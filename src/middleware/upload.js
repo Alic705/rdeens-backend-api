@@ -3,18 +3,33 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 
+import os from "os";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Create uploads directory
-const uploadsDir = path.join(__dirname, "../uploads/blogs");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+// Create uploads directory safely
+const isVercel = Boolean(process.env.VERCEL);
+const uploadsDir = isVercel
+  ? path.join(os.tmpdir(), "uploads", "blogs")
+  : path.join(__dirname, "../uploads/blogs");
+
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn("Blog uploads directory notice:", e.message);
 }
 
 // Storage configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
+    try {
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+    } catch {}
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {

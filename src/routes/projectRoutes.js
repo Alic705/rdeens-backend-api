@@ -15,19 +15,35 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
+import os from 'os';
+
 const router = express.Router();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const uploadsDir = path.join(__dirname, '../uploads/projects');
+const isVercel = Boolean(process.env.VERCEL);
+const uploadsDir = isVercel
+  ? path.join(os.tmpdir(), 'uploads', 'projects')
+  : path.join(__dirname, '../uploads/projects');
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Project uploads directory notice:', e.message);
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
+  destination: (req, file, cb) => {
+    try {
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+    } catch {}
+    cb(null, uploadsDir);
+  },
   filename: (req, file, cb) => {
     const uniqueName =
       Date.now() +
