@@ -130,6 +130,14 @@ app.use((err, req, res, next) => {
     });
   }
 
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue || {})[0] || "title";
+    return res.status(400).json({
+      success: false,
+      message: `A record with this ${field} already exists.`,
+    });
+  }
+
   if (err.name === "ValidationError") {
     return res.status(400).json({
       success: false,

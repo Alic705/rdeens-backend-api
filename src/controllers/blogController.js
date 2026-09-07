@@ -211,9 +211,22 @@ export const createBlog = async (req, res) => {
     });
   } catch (error) {
     console.error("Create blog error:", error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue || {})[0] || "title";
+      return res.status(400).json({
+        success: false,
+        message: `A blog with this ${field} already exists. Please choose a different title.`,
+      });
+    }
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map(e => e.message).join(", "),
+      });
+    }
     res.status(500).json({
       success: false,
-      message: "Failed to create blog",
+      message: error.message || "Failed to create blog",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
@@ -407,9 +420,22 @@ export const updateBlog = async (req, res) => {
     });
   } catch (error) {
     console.error("Update blog error:", error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue || {})[0] || "title";
+      return res.status(400).json({
+        success: false,
+        message: `A blog with this ${field} already exists. Please choose a different title.`,
+      });
+    }
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map(e => e.message).join(", "),
+      });
+    }
     res.status(500).json({
       success: false,
-      message: "Failed to update blog",
+      message: error.message || "Failed to update blog",
     });
   }
 };

@@ -126,7 +126,7 @@ export function generateSlug(title) {
 
 // Auto slug generation before validation
 blogSchema.pre("validate", function () {
-  if (this.title && (!this.slug || this.isModified("title"))) {
+  if (this.title && !this.slug) {
     this.slug = generateSlug(this.title);
   }
 });
