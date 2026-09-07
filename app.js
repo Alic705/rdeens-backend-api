@@ -72,7 +72,8 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cookieParser());
 
 app.use("/uploads", express.static(path.join(__dirname, "src", "uploads")));
@@ -123,10 +124,10 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error(" Global Error:", err.stack);
 
-  if (err.code === "LIMIT_FILE_SIZE") {
+  if (err.code === "LIMIT_FILE_SIZE" || err.code === "LIMIT_FIELD_VALUE") {
     return res.status(400).json({
       success: false,
-      message: "File too large. Max 5MB allowed.",
+      message: "File or content size too large. Max 25MB allowed.",
     });
   }
 

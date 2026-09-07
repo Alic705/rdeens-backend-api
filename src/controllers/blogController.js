@@ -94,7 +94,17 @@ export const createBlog = async (req, res) => {
     let detailImage = req.body.detailImage || "";
 
     if (files.coverImage && files.coverImage[0]) {
-      coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+      if (process.env.VERCEL) {
+        const filePath = files.coverImage[0].path;
+        if (fs.existsSync(filePath)) {
+          const buffer = fs.readFileSync(filePath);
+          const mimeType = files.coverImage[0].mimetype || "image/jpeg";
+          coverImage = `data:${mimeType};base64,${buffer.toString("base64")}`;
+          try { fs.unlinkSync(filePath); } catch { }
+        }
+      } else {
+        coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+      }
     } else if (files.thumbnail && files.thumbnail[0]) {
       coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
     } else if (files.image && files.image[0]) {
@@ -370,7 +380,17 @@ export const updateBlog = async (req, res) => {
     // Process Files
     const files = req.files || {};
     if (files.coverImage && files.coverImage[0]) {
-      updateData.coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+      if (process.env.VERCEL) {
+        const filePath = files.coverImage[0].path;
+        if (fs.existsSync(filePath)) {
+          const buffer = fs.readFileSync(filePath);
+          const mimeType = files.coverImage[0].mimetype || "image/jpeg";
+          updateData.coverImage = `data:${mimeType};base64,${buffer.toString("base64")}`;
+          try { fs.unlinkSync(filePath); } catch { }
+        }
+      } else {
+        updateData.coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+      }
     } else if (files.thumbnail && files.thumbnail[0]) {
       updateData.coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
     } else if (files.image && files.image[0]) {
@@ -493,7 +513,17 @@ export const uploadInlineImage = async (req, res) => {
       });
     }
 
-    const imageUrl = `/uploads/blogs/${file.filename}`;
+    let imageUrl = `/uploads/blogs/${file.filename}`;
+    if (process.env.VERCEL) {
+      const filePath = file.path;
+      if (fs.existsSync(filePath)) {
+        const buffer = fs.readFileSync(filePath);
+        const mimeType = file.mimetype || "image/jpeg";
+        imageUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
+        try { fs.unlinkSync(filePath); } catch { }
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: "Image uploaded successfully",
