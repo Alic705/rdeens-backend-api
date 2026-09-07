@@ -29,7 +29,7 @@ const storage = multer.diskStorage({
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-    } catch {}
+    } catch { }
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
@@ -66,5 +66,7 @@ export const uploadBlogImages = upload.fields([
   { name: "coverImage", maxCount: 1 },
   { name: "detailImage", maxCount: 1 },
   { name: "thumbnail", maxCount: 1 },
+  { name: "image", maxCount: 1 },
+  { name: "file", maxCount: 1 },
   { name: "images", maxCount: 10 },
 ]);

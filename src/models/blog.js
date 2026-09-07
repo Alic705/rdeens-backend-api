@@ -16,15 +16,27 @@ const blogSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    content: {
+      type: String,
+      default: "", // Arbitrary length rich HTML (h2, h3, paragraphs, bold, italic, links, checklists, inline images)
+    },
+    excerpt: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     tag: {
       type: String,
-      required: [true, "Tag is required"],
       trim: true,
       default: "Web Development",
     },
+    tags: {
+      type: [String],
+      default: [],
+    },
     description: {
       type: String,
-      required: [true, "Description is required"],
+      default: "",
       trim: true,
     },
     coverImage: {
@@ -37,27 +49,53 @@ const blogSchema = new mongoose.Schema(
       default: Date.now,
       immutable: true, // Backend forces system date; cannot be overwritten by client updates
     },
+    status: {
+      type: String,
+      enum: ["draft", "published", "archived"],
+      default: "published",
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false,
+    },
+    author: {
+      name: { type: String, default: "Rdeens Team" },
+      role: { type: String, default: "Rdeens Editorial Team" },
+      bio: {
+        type: String,
+        default:
+          "Published and managed by Rdeens Admin team. Delivering high quality technical insights and digital strategies.",
+      },
+    },
+    metaTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    metaDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // Legacy fields preserved for backward compatibility
     checklists: {
       type: [String],
       default: [],
-      validate: [
-        (val) => !val || val.length <= 5,
-        "Checklists cannot exceed 5 items",
-      ],
     },
     sectionTitle: {
       type: String,
-      required: [true, "Section title is required"],
+      default: "",
       trim: true,
     },
     sectionDescription: {
       type: String,
-      required: [true, "Section description is required"],
+      default: "",
       trim: true,
     },
     detailImage: {
       type: String,
-      required: [true, "Detail image is required"],
+      default: "",
       trim: true,
     },
     extraTitle: {
@@ -69,24 +107,6 @@ const blogSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
-    },
-    author: {
-      name: { type: String, default: "Super Admin" },
-      role: { type: String, default: "Rdeens Editorial Team" },
-      bio: {
-        type: String,
-        default:
-          "Published and managed by Rdeens Admin team. Delivering high quality technical insights and digital strategies.",
-      },
-    },
-    status: {
-      type: String,
-      enum: ["draft", "published", "archived"],
-      default: "published",
-    },
-    isFeatured: {
-      type: Boolean,
-      default: false,
     },
   },
   {

@@ -10,6 +10,9 @@ const __dirname = path.dirname(__filename);
 // Helper to ensure unique slug
 async function getUniqueSlug(baseTitle, existingId = null) {
   let baseSlug = generateSlug(baseTitle);
+  if (!baseSlug) {
+    baseSlug = "post-" + Date.now();
+  }
   let slug = baseSlug;
   let counter = 1;
 
@@ -31,16 +34,30 @@ export const createBlog = async (req, res) => {
   try {
     const {
       title,
-      tag,
+      content,
+      excerpt,
       description,
+      tag,
+      tags,
+      author,
+      status,
+      isFeatured,
+      metaTitle,
+      metaDescription,
       sectionTitle,
       sectionDescription,
       extraTitle,
       extraDescription,
-      status,
-      isFeatured,
     } = req.body;
 
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Title is required",
+      });
+    }
+
+    // Process Checklists if provided
     let checklists = req.body.checklists || [];
     if (typeof checklists === "string") {
       try {
@@ -53,13 +70,25 @@ export const createBlog = async (req, res) => {
       }
     }
 
-    if (checklists.length > 5) {
-      return res.status(400).json({
-        success: false,
-        message: "Checklists cannot exceed 5 items",
-      });
+    // Process Tags if provided
+    let parsedTags = [];
+    if (Array.isArray(tags)) {
+      parsedTags = tags;
+    } else if (typeof tags === "string") {
+      try {
+        parsedTags = JSON.parse(tags);
+      } catch {
+        parsedTags = tags
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+    if (tag && !parsedTags.includes(tag.trim())) {
+      parsedTags.unshift(tag.trim());
     }
 
+    // Process Uploaded Files
     const files = req.files || {};
     let coverImage = req.body.coverImage || "";
     let detailImage = req.body.detailImage || "";
@@ -68,6 +97,10 @@ export const createBlog = async (req, res) => {
       coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
     } else if (files.thumbnail && files.thumbnail[0]) {
       coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
+    } else if (files.image && files.image[0]) {
+      coverImage = `/uploads/blogs/${files.image[0].filename}`;
+    } else if (files.file && files.file[0]) {
+      coverImage = `/uploads/blogs/${files.file[0].filename}`;
     }
 
     if (files.detailImage && files.detailImage[0]) {
@@ -84,33 +117,91 @@ export const createBlog = async (req, res) => {
     }
 
     if (!detailImage) {
-      detailImage = coverImage; // Fallback to cover image if detail image not uploaded separately
+      detailImage = coverImage;
+    }
+
+    // Normalized Excerpt & Description sync
+    const finalExcerpt = (excerpt || description || "").trim();
+    const finalDescription = (description || excerpt || "").trim();
+
+    // Auto-synthesize rich content if only legacy sections provided
+    let finalContent = (content || "").trim();
+    if (!finalContent && (sectionDescription || sectionTitle)) {
+      const parts = [];
+      if (finalDescription) {
+        parts.push(`<p class="lead-text">${finalDescription}</p>`);
+      }
+      if (checklists && checklists.length > 0) {
+        parts.push(
+          `<ul class="why-checklist">${checklists.map((c) => `<li>${c}</li>`).join("")}</ul>`
+        );
+      }
+      if (sectionTitle) {
+        parts.push(`<h2>${sectionTitle}</h2>`);
+      }
+      if (sectionDescription) {
+        parts.push(`<p>${sectionDescription}</p>`);
+      }
+      if (detailImage && detailImage !== coverImage) {
+        parts.push(`<img src="${detailImage}" alt="${sectionTitle || title}" />`);
+      }
+      if (extraTitle) {
+        parts.push(`<h2>${extraTitle}</h2>`);
+      }
+      if (extraDescription) {
+        parts.push(`<p>${extraDescription}</p>`);
+      }
+      finalContent = parts.join("\n");
     }
 
     const slug = await getUniqueSlug(title);
 
-    const authorData = {
-      name: req.user?.name || "Super Admin",
+    // Author data formatting
+    let authorData = {
+      name: "Rdeens Team",
       role: "Rdeens Editorial Team",
       bio: "Published and managed by Rdeens Admin team. Delivering high quality technical insights and digital strategies.",
     };
 
+    if (typeof author === "string" && author.trim()) {
+      try {
+        authorData = JSON.parse(author);
+      } catch {
+        authorData.name = author.trim();
+      }
+    } else if (author && typeof author === "object") {
+      authorData = {
+        name: author.name || "Rdeens Team",
+        role: author.role || "Rdeens Editorial Team",
+        bio: author.bio || authorData.bio,
+      };
+    } else if (req.user?.name) {
+      authorData.name = req.user.name;
+    }
+
     const blog = await Blog.create({
       title: title.trim(),
       slug,
-      tag: tag.trim(),
-      description: description.trim(),
+      content: finalContent,
+      excerpt: finalExcerpt,
+      description: finalDescription,
+      tag: (tag || parsedTags[0] || "Web Development").trim(),
+      tags: parsedTags,
       coverImage,
-      publishedDate: new Date(), // Server forces current timestamp (immutable)
+      publishedDate: new Date(), // Strictly server-enforced timestamp
+      author: authorData,
+      status: status || "published",
+      isFeatured: Boolean(isFeatured === true || isFeatured === "true"),
+      metaTitle: (metaTitle || "").trim(),
+      metaDescription: (metaDescription || "").trim(),
+
+      // Legacy fields
       checklists,
-      sectionTitle: sectionTitle.trim(),
-      sectionDescription: sectionDescription.trim(),
+      sectionTitle: (sectionTitle || "").trim(),
+      sectionDescription: (sectionDescription || "").trim(),
       detailImage,
       extraTitle: (extraTitle || "").trim(),
       extraDescription: (extraDescription || "").trim(),
-      author: authorData,
-      status: status || "published",
-      isFeatured: Boolean(isFeatured),
     });
 
     res.status(201).json({
@@ -135,18 +226,22 @@ export const getBlogs = async (req, res) => {
     const filter = { status: "published" };
 
     if (tag && tag !== "All") {
-      filter.tag = new RegExp(`^${tag}$`, "i");
+      filter.$or = [
+        { tag: new RegExp(`^${tag}$`, "i") },
+        { tags: new RegExp(`^${tag}$`, "i") },
+      ];
     }
 
     if (search) {
       filter.$or = [
         { title: { $regex: search, $options: "i" } },
+        { excerpt: { $regex: search, $options: "i" } },
         { description: { $regex: search, $options: "i" } },
       ];
     }
 
     const blogs = await Blog.find(filter)
-      .select("title slug tag description coverImage publishedDate checklists isFeatured createdAt")
+      .select("title slug tag tags excerpt description coverImage author publishedDate isFeatured createdAt")
       .sort({ publishedDate: -1, createdAt: -1 });
 
     res.status(200).json({
@@ -176,7 +271,7 @@ export const getBlogBySlug = async (req, res) => {
       }
     }
 
-    // Smart fallback: if requested slug doesn't exist (e.g. old legacy link), return the latest published blog
+    // Smart fallback: if requested slug doesn't exist, return latest published blog
     if (!blog) {
       blog = await Blog.findOne({ status: "published" }).sort({ publishedDate: -1, createdAt: -1 });
     }
@@ -225,6 +320,10 @@ export const updateBlog = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
+    // Strictly protect publishedDate from being modified by client
+    delete updateData.publishedDate;
+
+    // Process Checklists if provided
     if (updateData.checklists && typeof updateData.checklists === "string") {
       try {
         updateData.checklists = JSON.parse(updateData.checklists);
@@ -236,21 +335,35 @@ export const updateBlog = async (req, res) => {
       }
     }
 
-    if (updateData.checklists && updateData.checklists.length > 5) {
-      return res.status(400).json({
-        success: false,
-        message: "Checklists cannot exceed 5 items",
-      });
+    // Process Tags if provided
+    if (updateData.tags && typeof updateData.tags === "string") {
+      try {
+        updateData.tags = JSON.parse(updateData.tags);
+      } catch {
+        updateData.tags = updateData.tags
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
     }
 
-    // Delete publishedDate from updateData so it cannot be tampered with
-    delete updateData.publishedDate;
+    // Sync Excerpt & Description
+    if (updateData.excerpt && !updateData.description) {
+      updateData.description = updateData.excerpt;
+    } else if (updateData.description && !updateData.excerpt) {
+      updateData.excerpt = updateData.description;
+    }
 
+    // Process Files
     const files = req.files || {};
     if (files.coverImage && files.coverImage[0]) {
       updateData.coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
     } else if (files.thumbnail && files.thumbnail[0]) {
       updateData.coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
+    } else if (files.image && files.image[0]) {
+      updateData.coverImage = `/uploads/blogs/${files.image[0].filename}`;
+    } else if (files.file && files.file[0]) {
+      updateData.coverImage = `/uploads/blogs/${files.file[0].filename}`;
     }
 
     if (files.detailImage && files.detailImage[0]) {
@@ -265,6 +378,14 @@ export const updateBlog = async (req, res) => {
 
     if (updateData.title) {
       updateData.slug = await getUniqueSlug(updateData.title, id);
+    }
+
+    if (typeof updateData.author === "string" && updateData.author.trim()) {
+      try {
+        updateData.author = JSON.parse(updateData.author);
+      } catch {
+        updateData.author = { name: updateData.author.trim() };
+      }
     }
 
     const blog = await Blog.findByIdAndUpdate(id, updateData, {
@@ -331,6 +452,33 @@ export const deleteBlog = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to delete blog",
+    });
+  }
+};
+
+// 7. UPLOAD: Single Inline Image (Admin)
+export const uploadInlineImage = async (req, res) => {
+  try {
+    const file = req.file || (req.files && (req.files.image?.[0] || req.files.upload?.[0] || req.files.file?.[0]));
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image file uploaded",
+      });
+    }
+
+    const imageUrl = `/uploads/blogs/${file.filename}`;
+    res.status(200).json({
+      success: true,
+      message: "Image uploaded successfully",
+      url: imageUrl,
+      location: imageUrl, // CKEditor / TinyMCE compatibility
+    });
+  } catch (error) {
+    console.error("Upload inline image error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload image",
     });
   }
 };

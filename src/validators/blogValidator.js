@@ -13,49 +13,42 @@ export const createBlogValidator = Joi.object({
 
   slug: Joi.string().allow("", null).optional(),
 
-  tag: Joi.string()
-    .required()
-    .messages({
-      "string.empty": "Tag is required",
-    }),
+  content: Joi.string().allow("", null).optional(),
 
-  description: Joi.string()
-    .required()
-    .messages({
-      "string.empty": "Description is required",
-    }),
+  excerpt: Joi.string().allow("", null).optional(),
+
+  description: Joi.string().allow("", null).optional(),
+
+  tag: Joi.string().allow("", null).optional(),
+
+  tags: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string()
+    )
+    .optional(),
 
   coverImage: Joi.string().allow("", null).optional(),
   detailImage: Joi.string().allow("", null).optional(),
 
   checklists: Joi.alternatives()
     .try(
-      Joi.array().items(Joi.string()).max(5),
-      Joi.string() // in case parsed from FormData string
+      Joi.array().items(Joi.string()),
+      Joi.string()
     )
-    .optional()
-    .messages({
-      "array.max": "Checklists cannot exceed 5 items",
-    }),
+    .optional(),
 
-  sectionTitle: Joi.string()
-    .required()
-    .messages({
-      "string.empty": "Section title is required",
-    }),
-
-  sectionDescription: Joi.string()
-    .required()
-    .messages({
-      "string.empty": "Section description is required",
-    }),
-
+  sectionTitle: Joi.string().allow("", null).optional(),
+  sectionDescription: Joi.string().allow("", null).optional(),
   extraTitle: Joi.string().allow("", null).optional(),
   extraDescription: Joi.string().allow("", null).optional(),
 
   status: Joi.string().valid("draft", "published", "archived").default("published"),
-  isFeatured: Joi.boolean().default(false),
-  author: Joi.object().optional(),
+  isFeatured: Joi.alternatives().try(Joi.boolean(), Joi.string()).default(false),
+  author: Joi.alternatives().try(Joi.object(), Joi.string()).optional(),
+
+  metaTitle: Joi.string().allow("", null).optional(),
+  metaDescription: Joi.string().allow("", null).optional(),
 });
 
 export const validateBlog = (req, res, next) => {
@@ -65,6 +58,18 @@ export const validateBlog = (req, res, next) => {
       req.body.checklists = JSON.parse(req.body.checklists);
     } catch {
       req.body.checklists = req.body.checklists
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+  }
+
+  // If tags is passed as JSON string in FormData, parse it
+  if (typeof req.body.tags === "string") {
+    try {
+      req.body.tags = JSON.parse(req.body.tags);
+    } catch {
+      req.body.tags = req.body.tags
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
