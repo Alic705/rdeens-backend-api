@@ -4,6 +4,7 @@ import {
   getBlogs,
   getBlogBySlug,
   getAllBlogsAdmin,
+  serveBlogImage,
   updateBlog,
   deleteBlog,
   uploadInlineImage,
@@ -17,6 +18,7 @@ const router = express.Router();
 // Public Routes
 router.get("/", getBlogs);
 router.get("/all", protect, admin, getAllBlogsAdmin);
+router.get("/image/:id", serveBlogImage);
 router.get("/:slug", getBlogBySlug);
 
 // Admin Protected Routes

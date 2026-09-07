@@ -242,6 +242,19 @@ export const createBlog = async (req, res) => {
   }
 };
 
+// Helper to normalize blog image URLs so raw base64 is never bloated in JSON payloads
+export function formatBlogListItem(b) {
+  if (!b) return b;
+  const blogObj = b.toObject ? b.toObject() : { ...b };
+  if (blogObj.coverImage && blogObj.coverImage.startsWith("data:image/")) {
+    blogObj.coverImage = `/api/blogs/image/${blogObj._id}?type=cover`;
+  }
+  if (blogObj.detailImage && blogObj.detailImage.startsWith("data:image/")) {
+    blogObj.detailImage = `/api/blogs/image/${blogObj._id}?type=detail`;
+  }
+  return blogObj;
+}
+
 // 2. GET: Public Published Blogs Listing
 export const getBlogs = async (req, res) => {
   try {
@@ -264,13 +277,15 @@ export const getBlogs = async (req, res) => {
     }
 
     const blogs = await Blog.find(filter)
-      .select("title slug tag tags excerpt description coverImage author publishedDate isFeatured createdAt")
+      .select("title slug tag tags excerpt description coverImage detailImage author publishedDate isFeatured createdAt")
       .sort({ publishedDate: -1, createdAt: -1 });
+
+    const formattedBlogs = blogs.map(formatBlogListItem);
 
     res.status(200).json({
       success: true,
-      count: blogs.length,
-      data: blogs,
+      count: formattedBlogs.length,
+      data: formattedBlogs,
     });
   } catch (error) {
     console.error("Get blogs error:", error);
@@ -306,9 +321,11 @@ export const getBlogBySlug = async (req, res) => {
       });
     }
 
+    const formattedBlog = formatBlogListItem(blog);
+
     res.status(200).json({
       success: true,
-      data: blog,
+      data: formattedBlog,
     });
   } catch (error) {
     console.error("Get blog by slug error:", error);
@@ -323,10 +340,12 @@ export const getBlogBySlug = async (req, res) => {
 export const getAllBlogsAdmin = async (req, res) => {
   try {
     const blogs = await Blog.find().sort({ createdAt: -1 });
+    const formattedBlogs = blogs.map(formatBlogListItem);
+
     res.status(200).json({
       success: true,
-      count: blogs.length,
-      data: blogs,
+      count: formattedBlogs.length,
+      data: formattedBlogs,
     });
   } catch (error) {
     console.error("Get all blogs error:", error);
@@ -334,6 +353,62 @@ export const getAllBlogsAdmin = async (req, res) => {
       success: false,
       message: "Failed to fetch all blogs",
     });
+  }
+};
+
+// Dedicated Binary Stream Image Endpoint with Caching (Zero JSON Bloat)
+export const serveBlogImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).send("Invalid blog ID");
+    }
+
+    const blog = await Blog.findById(id).select("coverImage detailImage");
+    if (!blog) {
+      return res.status(404).send("Blog not found");
+    }
+
+    const imageField = type === "detail" ? blog.detailImage : (blog.coverImage || blog.detailImage);
+    if (!imageField) {
+      return res.status(404).send("Image not found");
+    }
+
+    // 1. If base64 data URL
+    if (imageField.startsWith("data:image/")) {
+      const matches = imageField.match(/^data:([a-zA-Z0-9\/+-]+);base64,(.+)$/);
+      if (matches) {
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        const buffer = Buffer.from(base64Data, "base64");
+
+        res.set("Content-Type", mimeType);
+        res.set("Content-Length", buffer.length);
+        res.set("Cache-Control", "public, max-age=31536000, immutable");
+        return res.send(buffer);
+      }
+    }
+
+    // 2. If full external URL, redirect
+    if (imageField.startsWith("http://") || imageField.startsWith("https://")) {
+      return res.redirect(imageField);
+    }
+
+    // 3. If local file path, send file if exists on disk
+    const cleanPath = imageField.startsWith("/") ? imageField.slice(1) : imageField;
+    const fullPath = path.join(__dirname, "../../", cleanPath);
+    if (fs.existsSync(fullPath)) {
+      res.set("Cache-Control", "public, max-age=31536000, immutable");
+      return res.sendFile(fullPath);
+    }
+
+    // Default Fallback
+    return res.redirect("/assets/images/img/blog-ai.webp");
+  } catch (error) {
+    console.error("Serve blog image error:", error);
+    res.status(500).send("Internal Server Error");
   }
 };
 
