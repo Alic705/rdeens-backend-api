@@ -2,6 +2,7 @@ import Testimonial from "../models/testimonial.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { uploadToCloudinary } from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,9 +20,12 @@ export const createTestimonial = async function (req, res) {
       status,
     } = req.body;
 
-    let logoUrl = null;
-    if (req.files && req.files.logo) {
-      logoUrl = `/uploads/testimonials/${req.files.logo[0].filename}`;
+    let imageUrl = null;
+    if (req.file) {
+      imageUrl = await uploadToCloudinary(
+        req.file.buffer,
+        "rdeens/testimonials"
+      );
     }
     const testimonial = await Testimonial.create({
       name,
@@ -32,7 +36,7 @@ export const createTestimonial = async function (req, res) {
       order,
       isFeatured,
       status,
-      logo: logoUrl,
+      image: imageUrl,
       createdBy: req.user.id,
     });
     return res.status(201).json({
@@ -124,44 +128,11 @@ export const updateTestimonial = async (req, res) => {
     if (isFeatured !== undefined) updateData.isFeatured = isFeatured === "true";
     if (status) updateData.status = status;
 
-    if (req.files && req.files.logo && req.files.logo[0]) {
-      // Delete OLD logo file if exists
-      if (existingTestimonial.logo) {
-        const oldLogoPath = path.join(
-          __dirname,
-          "..",
-          existingTestimonial.logo,
-        );
-        console.log(" Deleting old logo:", oldLogoPath);
-
-        if (fs.existsSync(oldLogoPath)) {
-          fs.unlinkSync(oldLogoPath);
-          console.log(" Old logo deleted");
-        }
-      }
-
-      updateData.logo = `/uploads/testimonials/${req.files.logo[0].filename}`;
-      console.log(" New logo path:", updateData.logo);
-    }
-
-    if (req.files && req.files.image && req.files.image[0]) {
-      // Delete OLD image file if exists
-      if (existingTestimonial.image) {
-        const oldImagePath = path.join(
-          __dirname,
-          "..",
-          existingTestimonial.image,
-        );
-        console.log(" Deleting old image:", oldImagePath);
-
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-          console.log(" Old image deleted");
-        }
-      }
-
-      updateData.image = `/uploads/testimonials/${req.files.image[0].filename}`;
-      console.log(" New image path:", updateData.image);
+    if (req.file) {
+      updateData.image = await uploadToCloudinary(
+        req.file.buffer,
+        "rdeens/testimonials"
+      );
     }
 
     const updatedTestimonial = await Testimonial.findByIdAndUpdate(

@@ -3,6 +3,7 @@ import sanitizeHtml from "sanitize-html";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { uploadToCloudinary } from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,12 +55,23 @@ export const createProject = async (req, res) => {
     const thumbnailFile = files.thumbnail[0];
     const imageFiles = files.images || [];
 
+    const thumbnailUrl = await uploadToCloudinary(
+      thumbnailFile.buffer,
+      "rdeens/projects"
+    );
+
+    const imageUrls = await Promise.all(
+      imageFiles.map((file) =>
+        uploadToCloudinary(file.buffer, "rdeens/projects")
+      )
+    );
+
     const project = await Project.create({
       title,
       shortDescription,
       description: sanitizeContent(description),
-      thumbnail: `/uploads/projects/${thumbnailFile.filename}`,
-      images: imageFiles.map((file) => `/uploads/projects/${file.filename}`),
+      thumbnail: thumbnailUrl,
+      images: imageUrls,
       category,
       status,
       isFeatured,
@@ -157,22 +169,17 @@ export const updateProject = async (req, res) => {
     }
 
     if (thumbnailFile) {
-      if (existingProject.thumbnail) {
-        const oldPath = path.join(__dirname, "..", existingProject.thumbnail);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
-
-      updateData.thumbnail = `/uploads/projects/${thumbnailFile.filename}`;
+      updateData.thumbnail = await uploadToCloudinary(
+        thumbnailFile.buffer,
+        "rdeens/projects"
+      );
     }
 
     if (imageFiles.length > 0) {
-      existingProject.images.forEach((img) => {
-        const imgPath = path.join(__dirname, "..", img);
-        if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-      });
-
-      updateData.images = imageFiles.map(
-        (file) => `/uploads/projects/${file.filename}`,
+      updateData.images = await Promise.all(
+        imageFiles.map((file) =>
+          uploadToCloudinary(file.buffer, "rdeens/projects")
+        )
       );
     }
 
@@ -208,17 +215,8 @@ export const deleteProject = async (req, res) => {
       });
     }
 
-    if (project.thumbnail) {
-      const thumbPath = path.join(__dirname, "..", project.thumbnail);
-      if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
-    }
-
-    if (project.images?.length) {
-      project.images.forEach((img) => {
-        const imgPath = path.join(__dirname, "..", img);
-        if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-      });
-    }
+    // No local deletion since images are on ImageKit
+    // Wait, if we want we can delete them from ImageKit via API, but skipping for now
 
     await Project.findByIdAndDelete(id);
 

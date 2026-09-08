@@ -3,6 +3,7 @@ import Blog, { generateSlug } from "../models/blog.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { uploadToCloudinary } from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,30 +94,30 @@ export const createBlog = async (req, res) => {
     let coverImage = req.body.coverImage || "";
     let detailImage = req.body.detailImage || "";
 
-    if (files.coverImage && files.coverImage[0]) {
-      if (process.env.VERCEL) {
-        const filePath = files.coverImage[0].path;
-        if (fs.existsSync(filePath)) {
-          const buffer = fs.readFileSync(filePath);
-          const mimeType = files.coverImage[0].mimetype || "image/jpeg";
-          coverImage = `data:${mimeType};base64,${buffer.toString("base64")}`;
-          try { fs.unlinkSync(filePath); } catch { }
-        }
-      } else {
-        coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+    const handleUpload = async (fileArray) => {
+      if (fileArray && fileArray.length > 0) {
+        return await uploadToCloudinary(
+          fileArray[0].buffer,
+          "rdeens/blogs"
+        );
       }
-    } else if (files.thumbnail && files.thumbnail[0]) {
-      coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
-    } else if (files.image && files.image[0]) {
-      coverImage = `/uploads/blogs/${files.image[0].filename}`;
-    } else if (files.file && files.file[0]) {
-      coverImage = `/uploads/blogs/${files.file[0].filename}`;
+      return null;
+    };
+
+    if (files.coverImage) {
+      coverImage = await handleUpload(files.coverImage);
+    } else if (files.thumbnail) {
+      coverImage = await handleUpload(files.thumbnail);
+    } else if (files.image) {
+      coverImage = await handleUpload(files.image);
+    } else if (files.file) {
+      coverImage = await handleUpload(files.file);
     }
 
-    if (files.detailImage && files.detailImage[0]) {
-      detailImage = `/uploads/blogs/${files.detailImage[0].filename}`;
-    } else if (files.images && files.images[0]) {
-      detailImage = `/uploads/blogs/${files.images[0].filename}`;
+    if (files.detailImage) {
+      detailImage = await handleUpload(files.detailImage);
+    } else if (files.images) {
+      detailImage = await handleUpload(files.images);
     }
 
     if (!coverImage) {
@@ -454,30 +455,31 @@ export const updateBlog = async (req, res) => {
 
     // Process Files
     const files = req.files || {};
-    if (files.coverImage && files.coverImage[0]) {
-      if (process.env.VERCEL) {
-        const filePath = files.coverImage[0].path;
-        if (fs.existsSync(filePath)) {
-          const buffer = fs.readFileSync(filePath);
-          const mimeType = files.coverImage[0].mimetype || "image/jpeg";
-          updateData.coverImage = `data:${mimeType};base64,${buffer.toString("base64")}`;
-          try { fs.unlinkSync(filePath); } catch { }
-        }
-      } else {
-        updateData.coverImage = `/uploads/blogs/${files.coverImage[0].filename}`;
+    
+    const handleUpload = async (fileArray) => {
+      if (fileArray && fileArray.length > 0) {
+        return await uploadToCloudinary(
+          fileArray[0].buffer,
+          "rdeens/blogs"
+        );
       }
-    } else if (files.thumbnail && files.thumbnail[0]) {
-      updateData.coverImage = `/uploads/blogs/${files.thumbnail[0].filename}`;
-    } else if (files.image && files.image[0]) {
-      updateData.coverImage = `/uploads/blogs/${files.image[0].filename}`;
-    } else if (files.file && files.file[0]) {
-      updateData.coverImage = `/uploads/blogs/${files.file[0].filename}`;
+      return null;
+    };
+
+    if (files.coverImage) {
+      updateData.coverImage = await handleUpload(files.coverImage);
+    } else if (files.thumbnail) {
+      updateData.coverImage = await handleUpload(files.thumbnail);
+    } else if (files.image) {
+      updateData.coverImage = await handleUpload(files.image);
+    } else if (files.file) {
+      updateData.coverImage = await handleUpload(files.file);
     }
 
-    if (files.detailImage && files.detailImage[0]) {
-      updateData.detailImage = `/uploads/blogs/${files.detailImage[0].filename}`;
-    } else if (files.images && files.images[0]) {
-      updateData.detailImage = `/uploads/blogs/${files.images[0].filename}`;
+    if (files.detailImage) {
+      updateData.detailImage = await handleUpload(files.detailImage);
+    } else if (files.images) {
+      updateData.detailImage = await handleUpload(files.images);
     }
 
     if (typeof updateData.isFeatured !== "undefined") {
@@ -580,31 +582,22 @@ export const deleteBlog = async (req, res) => {
 // 7. UPLOAD: Single Inline Image (Admin)
 export const uploadInlineImage = async (req, res) => {
   try {
-    const file = req.file || (req.files && (req.files.image?.[0] || req.files.upload?.[0] || req.files.file?.[0]));
-    if (!file) {
+    if (req.file) {
+      const imageUrl = await uploadToCloudinary(
+        req.file.buffer,
+        "rdeens/blogs/content"
+      );
+
+      res.status(200).json({
+        success: true,
+        url: imageUrl, // Return Cloudinary URL
+      });
+    } else {
       return res.status(400).json({
         success: false,
         message: "No image file uploaded",
       });
     }
-
-    let imageUrl = `/uploads/blogs/${file.filename}`;
-    if (process.env.VERCEL) {
-      const filePath = file.path;
-      if (fs.existsSync(filePath)) {
-        const buffer = fs.readFileSync(filePath);
-        const mimeType = file.mimetype || "image/jpeg";
-        imageUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
-        try { fs.unlinkSync(filePath); } catch { }
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Image uploaded successfully",
-      url: imageUrl,
-      location: imageUrl, // CKEditor / TinyMCE compatibility
-    });
   } catch (error) {
     console.error("Upload inline image error:", error);
     res.status(500).json({

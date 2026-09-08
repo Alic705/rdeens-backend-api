@@ -8,35 +8,8 @@ import os from "os";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Create uploads directory safely
-const isVercel = Boolean(process.env.VERCEL);
-const uploadsDir = isVercel
-  ? path.join(os.tmpdir(), "uploads", "blogs")
-  : path.join(__dirname, "../uploads/blogs");
-
-try {
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-} catch (e) {
-  console.warn("Blog uploads directory notice:", e.message);
-}
-
 // Storage configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    try {
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-    } catch { }
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
+const storage = multer.memoryStorage();
 
 // File filter (only images)
 const fileFilter = (req, file, cb) => {
