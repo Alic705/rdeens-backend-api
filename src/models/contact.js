@@ -11,9 +11,10 @@ const contactSchema = new mongoose.Schema(
     },
     lastName: {
       type: String,
+      required: [true, "Last name is required"],
       trim: true,
-      default: "",
       maxLength: 100,
+      minLength: 1,
     },
     email: {
       type: String,
@@ -25,6 +26,11 @@ const contactSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    inquiryType: {
+      type: String,
+      trim: true,
+      default: "General Inquiry",
     },
     phone: {
       type: String,

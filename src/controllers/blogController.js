@@ -3,12 +3,12 @@ import Blog, { generateSlug } from "../models/blog.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { uploadToCloudinary } from "../config/cloudinary.js";
+import { uploadToCloudinary, uploadBase64ToCloudinary } from "../config/cloudinary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Helper to ensure unique slug
+// Helper to ensure unique slug (fast-path index check with zero overhead)
 async function getUniqueSlug(baseTitle, existingId = null) {
   let baseSlug = generateSlug(baseTitle);
   if (!baseSlug) {
@@ -22,7 +22,7 @@ async function getUniqueSlug(baseTitle, existingId = null) {
     if (existingId) {
       query._id = { $ne: existingId };
     }
-    const exists = await Blog.findOne(query);
+    const exists = await Blog.exists(query);
     if (!exists) break;
     slug = `${baseSlug}-${counter}`;
     counter++;
@@ -112,12 +112,16 @@ export const createBlog = async (req, res) => {
       coverImage = await handleUpload(files.image);
     } else if (files.file) {
       coverImage = await handleUpload(files.file);
+    } else if (coverImage && coverImage.startsWith("data:image/")) {
+      coverImage = (await uploadBase64ToCloudinary(coverImage, "rdeens/blogs")) || coverImage;
     }
 
     if (files.detailImage) {
       detailImage = await handleUpload(files.detailImage);
     } else if (files.images) {
       detailImage = await handleUpload(files.images);
+    } else if (detailImage && detailImage.startsWith("data:image/")) {
+      detailImage = (await uploadBase64ToCloudinary(detailImage, "rdeens/blogs")) || detailImage;
     }
 
     if (!coverImage) {
@@ -215,10 +219,12 @@ export const createBlog = async (req, res) => {
       extraDescription: (extraDescription || "").trim(),
     });
 
+    const formattedBlog = formatBlogListItem(blog);
+
     res.status(201).json({
       success: true,
       message: "Blog created successfully",
-      data: blog,
+      data: formattedBlog,
     });
   } catch (error) {
     console.error("Create blog error:", error);
@@ -256,37 +262,78 @@ export function formatBlogListItem(b) {
   return blogObj;
 }
 
-// 2. GET: Public Published Blogs Listing
+// 2. GET: Public Published Blogs Listing (Ultra-fast projection: zero heavy base64 over wire)
 export const getBlogs = async (req, res) => {
   try {
     const { tag, search } = req.query;
-    const filter = { status: "published" };
+    const matchStage = { status: "published" };
 
     if (tag && tag !== "All") {
-      filter.$or = [
+      matchStage.$or = [
         { tag: new RegExp(`^${tag}$`, "i") },
         { tags: new RegExp(`^${tag}$`, "i") },
       ];
     }
 
     if (search) {
-      filter.$or = [
+      matchStage.$or = [
         { title: { $regex: search, $options: "i" } },
         { excerpt: { $regex: search, $options: "i" } },
         { description: { $regex: search, $options: "i" } },
       ];
     }
 
-    const blogs = await Blog.find(filter)
-      .select("title slug tag tags excerpt description coverImage detailImage author publishedDate isFeatured createdAt")
-      .sort({ publishedDate: -1, createdAt: -1 });
-
-    const formattedBlogs = blogs.map(formatBlogListItem);
+    const blogs = await Blog.aggregate([
+      { $match: matchStage },
+      { $sort: { publishedDate: -1, createdAt: -1 } },
+      {
+        $project: {
+          title: 1,
+          slug: 1,
+          tag: 1,
+          tags: 1,
+          excerpt: 1,
+          description: 1,
+          author: 1,
+          status: 1,
+          isFeatured: 1,
+          publishedDate: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          coverImage: {
+            $cond: {
+              if: {
+                $and: [
+                  { $ne: ["$coverImage", null] },
+                  { $ne: ["$coverImage", ""] },
+                  { $eq: [{ $substrCP: [{ $ifNull: ["$coverImage", ""] }, 0, 10] }, "data:image"] }
+                ]
+              },
+              then: { $concat: ["/api/blogs/image/", { $toString: "$_id" }, "?type=cover"] },
+              else: { $ifNull: ["$coverImage", ""] }
+            }
+          },
+          detailImage: {
+            $cond: {
+              if: {
+                $and: [
+                  { $ne: ["$detailImage", null] },
+                  { $ne: ["$detailImage", ""] },
+                  { $eq: [{ $substrCP: [{ $ifNull: ["$detailImage", ""] }, 0, 10] }, "data:image"] }
+                ]
+              },
+              then: { $concat: ["/api/blogs/image/", { $toString: "$_id" }, "?type=detail"] },
+              else: { $ifNull: ["$detailImage", ""] }
+            }
+          }
+        }
+      }
+    ]);
 
     res.status(200).json({
       success: true,
-      count: formattedBlogs.length,
-      data: formattedBlogs,
+      count: blogs.length,
+      data: blogs,
     });
   } catch (error) {
     console.error("Get blogs error:", error);
@@ -297,22 +344,100 @@ export const getBlogs = async (req, res) => {
   }
 };
 
-// 3. GET: Single Blog Detail by Slug (Public)
+// 3. GET: Single Blog Detail by Slug / ID (Public & Admin Edit - Ultra-fast Projection)
 export const getBlogBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
-    let blog = null;
+    let matchStage = null;
 
     if (slug) {
-      blog = await Blog.findOne({ slug: new RegExp(`^${slug}$`, "i") });
-      if (!blog && mongoose.Types.ObjectId.isValid(slug)) {
-        blog = await Blog.findById(slug);
+      if (mongoose.Types.ObjectId.isValid(slug)) {
+        matchStage = { _id: new mongoose.Types.ObjectId(slug) };
+      } else {
+        matchStage = { slug: slug.toLowerCase() };
+      }
+    }
+
+    const projectionStage = {
+      $project: {
+        title: 1,
+        slug: 1,
+        content: 1,
+        excerpt: 1,
+        description: 1,
+        tag: 1,
+        tags: 1,
+        author: 1,
+        status: 1,
+        isFeatured: 1,
+        metaTitle: 1,
+        metaDescription: 1,
+        checklists: 1,
+        sectionTitle: 1,
+        sectionDescription: 1,
+        extraTitle: 1,
+        extraDescription: 1,
+        publishedDate: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        coverImage: {
+          $cond: {
+            if: {
+              $and: [
+                { $ne: ["$coverImage", null] },
+                { $ne: ["$coverImage", ""] },
+                { $eq: [{ $substrCP: [{ $ifNull: ["$coverImage", ""] }, 0, 10] }, "data:image"] }
+              ]
+            },
+            then: { $concat: ["/api/blogs/image/", { $toString: "$_id" }, "?type=cover"] },
+            else: { $ifNull: ["$coverImage", ""] }
+          }
+        },
+        detailImage: {
+          $cond: {
+            if: {
+              $and: [
+                { $ne: ["$detailImage", null] },
+                { $ne: ["$detailImage", ""] },
+                { $eq: [{ $substrCP: [{ $ifNull: ["$detailImage", ""] }, 0, 10] }, "data:image"] }
+              ]
+            },
+            then: { $concat: ["/api/blogs/image/", { $toString: "$_id" }, "?type=detail"] },
+            else: { $ifNull: ["$detailImage", ""] }
+          }
+        }
+      }
+    };
+
+    let blog = null;
+    if (matchStage) {
+      const results = await Blog.aggregate([
+        { $match: matchStage },
+        projectionStage,
+        { $limit: 1 }
+      ]);
+      blog = results[0] || null;
+
+      // If exact slug didn't match and it wasn't an ObjectId, try case-insensitive regex
+      if (!blog && !mongoose.Types.ObjectId.isValid(slug)) {
+        const regexResults = await Blog.aggregate([
+          { $match: { slug: new RegExp(`^${slug}$`, "i") } },
+          projectionStage,
+          { $limit: 1 }
+        ]);
+        blog = regexResults[0] || null;
       }
     }
 
     // Smart fallback: if requested slug doesn't exist, return latest published blog
     if (!blog) {
-      blog = await Blog.findOne({ status: "published" }).sort({ publishedDate: -1, createdAt: -1 });
+      const fallbackResults = await Blog.aggregate([
+        { $match: { status: "published" } },
+        { $sort: { publishedDate: -1, createdAt: -1 } },
+        projectionStage,
+        { $limit: 1 }
+      ]);
+      blog = fallbackResults[0] || null;
     }
 
     if (!blog) {
@@ -322,11 +447,9 @@ export const getBlogBySlug = async (req, res) => {
       });
     }
 
-    const formattedBlog = formatBlogListItem(blog);
-
     res.status(200).json({
       success: true,
-      data: formattedBlog,
+      data: blog,
     });
   } catch (error) {
     console.error("Get blog by slug error:", error);
@@ -337,16 +460,43 @@ export const getBlogBySlug = async (req, res) => {
   }
 };
 
-// 4. GET: All Blogs for Admin Table
+// 4. GET: All Blogs for Admin Table (Ultra-fast projection: zero heavy content over wire)
 export const getAllBlogsAdmin = async (req, res) => {
   try {
-    const blogs = await Blog.find().sort({ createdAt: -1 });
-    const formattedBlogs = blogs.map(formatBlogListItem);
+    const blogs = await Blog.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $project: {
+          title: 1,
+          slug: 1,
+          tag: 1,
+          tags: 1,
+          status: 1,
+          isFeatured: 1,
+          publishedDate: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          coverImage: {
+            $cond: {
+              if: {
+                $and: [
+                  { $ne: ["$coverImage", null] },
+                  { $ne: ["$coverImage", ""] },
+                  { $eq: [{ $substrCP: [{ $ifNull: ["$coverImage", ""] }, 0, 10] }, "data:image"] }
+                ]
+              },
+              then: { $concat: ["/api/blogs/image/", { $toString: "$_id" }, "?type=cover"] },
+              else: { $ifNull: ["$coverImage", ""] }
+            }
+          }
+        }
+      }
+    ]);
 
     res.status(200).json({
       success: true,
-      count: formattedBlogs.length,
-      data: formattedBlogs,
+      count: blogs.length,
+      data: blogs,
     });
   } catch (error) {
     console.error("Get all blogs error:", error);
@@ -367,7 +517,7 @@ export const serveBlogImage = async (req, res) => {
       return res.status(400).send("Invalid blog ID");
     }
 
-    const blog = await Blog.findById(id).select("coverImage detailImage");
+    const blog = await Blog.findById(id).select("coverImage detailImage").lean();
     if (!blog) {
       return res.status(404).send("Blog not found");
     }
@@ -474,12 +624,16 @@ export const updateBlog = async (req, res) => {
       updateData.coverImage = await handleUpload(files.image);
     } else if (files.file) {
       updateData.coverImage = await handleUpload(files.file);
+    } else if (updateData.coverImage && updateData.coverImage.startsWith("data:image/")) {
+      updateData.coverImage = (await uploadBase64ToCloudinary(updateData.coverImage, "rdeens/blogs")) || updateData.coverImage;
     }
 
     if (files.detailImage) {
       updateData.detailImage = await handleUpload(files.detailImage);
     } else if (files.images) {
       updateData.detailImage = await handleUpload(files.images);
+    } else if (updateData.detailImage && updateData.detailImage.startsWith("data:image/")) {
+      updateData.detailImage = (await uploadBase64ToCloudinary(updateData.detailImage, "rdeens/blogs")) || updateData.detailImage;
     }
 
     if (typeof updateData.isFeatured !== "undefined") {
@@ -501,7 +655,9 @@ export const updateBlog = async (req, res) => {
     const blog = await Blog.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
-    });
+    })
+      .select("-__v")
+      .lean();
 
     if (!blog) {
       return res.status(404).json({
@@ -510,10 +666,12 @@ export const updateBlog = async (req, res) => {
       });
     }
 
+    const formattedBlog = formatBlogListItem(blog);
+
     res.status(200).json({
       success: true,
       message: "Blog updated successfully",
-      data: blog,
+      data: formattedBlog,
     });
   } catch (error) {
     console.error("Update blog error:", error);
@@ -541,7 +699,7 @@ export const updateBlog = async (req, res) => {
 export const deleteBlog = async (req, res) => {
   try {
     const { id } = req.params;
-    const blog = await Blog.findById(id);
+    const blog = await Blog.findById(id).select("coverImage detailImage").lean();
 
     if (!blog) {
       return res.status(404).json({
