@@ -255,7 +255,12 @@ export const viewResumeFile = async (req, res) => {
 
       // 2. Remote / Cloudinary URL
       if (app.resumeUrl.startsWith("http://") || app.resumeUrl.startsWith("https://")) {
-        return res.redirect(app.resumeUrl);
+        let targetUrl = app.resumeUrl;
+        // Fix for Cloudinary PDF URLs uploaded under /image/upload/ -> convert to /raw/upload/
+        if (targetUrl.includes("cloudinary.com") && targetUrl.includes("/image/upload/")) {
+          targetUrl = targetUrl.replace("/image/upload/", "/raw/upload/");
+        }
+        return res.redirect(targetUrl);
       }
     }
 

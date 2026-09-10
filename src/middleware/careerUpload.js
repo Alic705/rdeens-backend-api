@@ -59,7 +59,7 @@ export const saveResumeFile = async (file) => {
     process.env.CLOUDINARY_API_SECRET
   ) {
     try {
-      const secureUrl = await uploadToCloudinary(file.buffer, "rdeens/resumes", "auto");
+      const secureUrl = await uploadToCloudinary(file.buffer, "rdeens/resumes", "raw");
       if (secureUrl) return secureUrl;
     } catch (err) {
       console.warn("Cloudinary upload failed for CV, attempting fallback storage:", err.message);
