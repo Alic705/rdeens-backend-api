@@ -42,30 +42,46 @@ export const uploadCareerCv = multer({
 });
 
 /**
- * Saves uploaded CV buffer directly to server local disk (/src/uploads/resumes/)
+ * Saves uploaded CV buffer safely:
+ * - Uses compact filename format (e.g. cv-m2k8x9p.pdf) to ensure short URL paths.
+ * - Writes to src/uploads/resumes/ locally or /tmp/resumes/ on Vercel serverless to prevent EROFS & URI_TOO_LONG errors.
  */
 export const saveResumeFile = async (file) => {
   if (!file || !file.buffer) {
     throw new Error("No file uploaded");
   }
 
-  // Save locally in src/uploads/resumes
-  const resumesDir = path.join(__dirname, "..", "uploads", "resumes");
-  if (!fs.existsSync(resumesDir)) {
-    fs.mkdirSync(resumesDir, { recursive: true });
+  const ext = path.extname(file.originalname).toLowerCase() || ".pdf";
+  // Compact short filename format (e.g. cv-m2k8x9p.pdf)
+  const shortFilename = `cv-${Date.now().toString(36)}${ext}`;
+
+  // Determine writable directory (/tmp/resumes on Vercel serverless, src/uploads/resumes locally)
+  let targetDir = path.join(__dirname, "..", "uploads", "resumes");
+  
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    targetDir = path.join("/tmp", "resumes");
   }
 
-  const ext = path.extname(file.originalname) || ".pdf";
-  const uniqueFilename = `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-  const filePath = path.join(resumesDir, uniqueFilename);
-
   try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const filePath = path.join(targetDir, shortFilename);
     await fs.promises.writeFile(filePath, file.buffer);
-    return `/uploads/resumes/${uniqueFilename}`;
-  } catch (fsErr) {
-    console.warn("Local disk write error, using Base64 fallback:", fsErr.message);
-    const mime = file.mimetype || "application/pdf";
-    const base64Data = file.buffer.toString("base64");
-    return `data:${mime};base64,${base64Data}`;
+    return `/uploads/resumes/${shortFilename}`;
+  } catch (err) {
+    // Backup try using /tmp/resumes if main folder write failed
+    try {
+      const tmpDir = path.join("/tmp", "resumes");
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      const tmpPath = path.join(tmpDir, shortFilename);
+      await fs.promises.writeFile(tmpPath, file.buffer);
+      return `/uploads/resumes/${shortFilename}`;
+    } catch (fallbackErr) {
+      console.error("Resume file write failed:", fallbackErr);
+      throw new Error("Failed to save resume file");
+    }
   }
 };

@@ -223,7 +223,17 @@ export const viewResumeFile = async (req, res) => {
 
     // Security: Path traversal protection
     const safeFilename = path.basename(filename);
-    const filePath = path.join(__dirname, "..", "uploads", "resumes", safeFilename);
+
+    // 1. Check local src/uploads/resumes/
+    let filePath = path.join(__dirname, "..", "uploads", "resumes", safeFilename);
+
+    // 2. Check /tmp/resumes/ on Vercel serverless
+    if (!fs.existsSync(filePath)) {
+      const tmpPath = path.join("/tmp", "resumes", safeFilename);
+      if (fs.existsSync(tmpPath)) {
+        filePath = tmpPath;
+      }
+    }
 
     if (fs.existsSync(filePath)) {
       const downloadName = req.query.name || safeFilename;
