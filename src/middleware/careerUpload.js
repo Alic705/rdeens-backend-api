@@ -42,46 +42,28 @@ export const uploadCareerCv = multer({
 });
 
 /**
- * Saves uploaded CV buffer safely:
- * 1. Uploads to Cloudinary if credentials are configured (Vercel-compatible)
- * 2. Writes to local disk (/src/uploads/resumes/) if in local dev environment
- * 3. Fallbacks to Base64 Data URI if file system is read-only (prevents EROFS 500 error on Vercel)
+ * Saves uploaded CV buffer directly to server local disk (/src/uploads/resumes/)
  */
 export const saveResumeFile = async (file) => {
   if (!file || !file.buffer) {
     throw new Error("No file uploaded");
   }
 
-  // 1. Try Cloudinary if environment variables are configured
-  if (
-    process.env.CLOUDINARY_CLOUD_NAME &&
-    process.env.CLOUDINARY_API_KEY &&
-    process.env.CLOUDINARY_API_SECRET
-  ) {
-    try {
-      const secureUrl = await uploadToCloudinary(file.buffer, "rdeens/resumes", "raw");
-      if (secureUrl) return secureUrl;
-    } catch (err) {
-      console.warn("Cloudinary upload failed for CV, attempting fallback storage:", err.message);
-    }
+  // Save locally in src/uploads/resumes
+  const resumesDir = path.join(__dirname, "..", "uploads", "resumes");
+  if (!fs.existsSync(resumesDir)) {
+    fs.mkdirSync(resumesDir, { recursive: true });
   }
 
-  // 2. Try saving locally in src/uploads/resumes (for local dev)
+  const ext = path.extname(file.originalname) || ".pdf";
+  const uniqueFilename = `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+  const filePath = path.join(resumesDir, uniqueFilename);
+
   try {
-    const resumesDir = path.join(__dirname, "..", "uploads", "resumes");
-    if (!fs.existsSync(resumesDir)) {
-      fs.mkdirSync(resumesDir, { recursive: true });
-    }
-
-    const ext = path.extname(file.originalname) || ".pdf";
-    const uniqueFilename = `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-    const filePath = path.join(resumesDir, uniqueFilename);
-
     await fs.promises.writeFile(filePath, file.buffer);
     return `/uploads/resumes/${uniqueFilename}`;
   } catch (fsErr) {
-    console.warn("Local disk write failed (Vercel read-only filesystem detected), using Base64 fallback:", fsErr.message);
-    // 3. Vercel Serverless Fallback: Return Base64 Data URI
+    console.warn("Local disk write error, using Base64 fallback:", fsErr.message);
     const mime = file.mimetype || "application/pdf";
     const base64Data = file.buffer.toString("base64");
     return `data:${mime};base64,${base64Data}`;
