@@ -22,6 +22,7 @@ import projectRoutes from "./src/routes/projectRoutes.js";
 import projectCategoryRoutes from "./src/routes/projectCategoryRoutes.js";
 import mailRouter from "./src/routes/mailerRoutes.js";
 import faqRoutes from "./src/routes/faqRoutes.js";
+import careerRoutes from "./src/routes/careerRoutes.js";
 
 dotenv.config();
 connectDb();
@@ -100,6 +101,7 @@ app.get("/api", (req, res) => {
       "/api/projects",
       "/api/categories",
       "/api/faqs",
+      "/api/careers",
     ],
   });
 });
@@ -113,6 +115,7 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/project-categories", projectCategoryRoutes);
 app.use("/api/mail", mailRouter);
 app.use("/api/faqs", faqRoutes);
+app.use("/api/careers", careerRoutes);
 
 app.use((req, res, next) => {
   res.status(404).json({
