@@ -225,16 +225,44 @@ export const viewResumeFile = async (req, res) => {
     const safeFilename = path.basename(filename);
     const filePath = path.join(__dirname, "..", "uploads", "resumes", safeFilename);
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        message: "Resume file not found.",
-      });
+    if (fs.existsSync(filePath)) {
+      const downloadName = req.query.name || safeFilename;
+      return res.download(filePath, downloadName);
     }
 
-    // Direct attachment download
-    const downloadName = req.query.name || safeFilename;
-    res.download(filePath, downloadName);
+    // If file doesn't exist locally (e.g. Vercel deployment), lookup application by ID or filename in DB
+    const app = await Career.findOne({
+      $or: [
+        { resumeUrl: new RegExp(safeFilename, "i") },
+        { resumeUrl: { $regex: safeFilename } }
+      ]
+    }).lean();
+
+    if (app && app.resumeUrl) {
+      // 1. Base64 Data URI stored on Vercel
+      if (app.resumeUrl.startsWith("data:")) {
+        const matches = app.resumeUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches) {
+          const mimeType = matches[1] || "application/pdf";
+          const buffer = Buffer.from(matches[2], "base64");
+          const downloadName = app.resumeOriginalName || safeFilename;
+
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+          return res.send(buffer);
+        }
+      }
+
+      // 2. Remote / Cloudinary URL
+      if (app.resumeUrl.startsWith("http://") || app.resumeUrl.startsWith("https://")) {
+        return res.redirect(app.resumeUrl);
+      }
+    }
+
+    res.status(404).json({
+      success: false,
+      message: "Resume file not found.",
+    });
   } catch (error) {
     console.error("Download resume file error:", error);
     res.status(500).json({
