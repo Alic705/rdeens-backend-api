@@ -169,7 +169,8 @@ export const createBlog = async (req, res) => {
       finalContent = parts.join("\n");
     }
 
-    const slug = await getUniqueSlug(title);
+    const slugSource = req.body.slug && req.body.slug.trim() ? req.body.slug.trim() : title;
+    const slug = await getUniqueSlug(slugSource);
 
     // Author data formatting
     let authorData = {
@@ -640,7 +641,9 @@ export const updateBlog = async (req, res) => {
       updateData.isFeatured = updateData.isFeatured === true || updateData.isFeatured === "true";
     }
 
-    if (updateData.title) {
+    if (updateData.slug && typeof updateData.slug === "string" && updateData.slug.trim()) {
+      updateData.slug = await getUniqueSlug(updateData.slug.trim(), id);
+    } else if (updateData.title) {
       updateData.slug = await getUniqueSlug(updateData.title, id);
     }
 
